@@ -3,7 +3,8 @@ from reportlab.graphics.renderPDF import draw
 from svglib.svglib import svg2rlg, Drawing
 import os
 from typing import Tuple
-from reportlab.lib.colors import CMYKColor
+from reportlab.lib.colors import CMYKColor, Color
+import colorsys
 
 
 class BaseBackDesign:
@@ -13,6 +14,9 @@ class BaseBackDesign:
         self.height_mm = height_mm + 6  # 上下3mmずつ
         self.minimum_grid_size = 4.96  # px単位
         self.max_grid_size = self.minimum_grid_size * 4
+        # ポイント単位のサイズ（1mm = 2.8346pt）
+        self.width_pt = self.width_mm * 2.8346
+        self.height_pt = self.height_mm * 2.8346
 
     def calculate_logo_size(self, data: dict) -> Tuple[float, float]:
         """ロゴのサイズを計算"""
@@ -70,18 +74,64 @@ class BaseBackDesign:
         # Y座標を反転（フロントエンドの座標系に合わせる）
         y = meishi_height - (offset + (meishi_height - offset * 2 - logo_height) * position["y"] / 100) - logo_height
         
+        detailedness = data.get("pattern", {}).get("grid", {}).get("detailedness", 1.0)
+
         # グリッドに合わせて位置を調整
-        unit_size = self.minimum_grid_size
+        unit_size = self.minimum_grid_size * detailedness
         x = int(x / unit_size) * unit_size
         y = int(y / unit_size) * unit_size
         
         return x, y
 
+    def rgb_to_cmyk(self, r: float, g: float, b: float) -> Tuple[float, float, float, float]:
+        """RGB値をCMYK値に変換"""
+        if r == 0 and g == 0 and b == 0:
+            return (0, 0, 0, 1)  # 黒
+        
+        c = 1 - r
+        m = 1 - g
+        y = 1 - b
+        k = min(c, m, y)
+        
+        if k == 1:
+            return (0, 0, 0, 1)
+        
+        c = (c - k) / (1 - k)
+        m = (m - k) / (1 - k)
+        y = (y - k) / (1 - k)
+        
+        return (c, m, y, k)
+
+    def convert_svg_colors_to_cmyk(self, drawing: Drawing):
+        """SVGのRGBカラーをCMYKに変換"""
+        if hasattr(drawing, 'contents'):
+            for item in drawing.contents:
+                if hasattr(item, 'fillColor'):
+                    if isinstance(item.fillColor, Color) and not isinstance(item.fillColor, CMYKColor):
+                        r, g, b = item.fillColor.red, item.fillColor.green, item.fillColor.blue
+                        c, m, y, k = self.rgb_to_cmyk(r, g, b)
+                        item.fillColor = CMYKColor(c, m, y, k)
+                if hasattr(item, 'strokeColor'):
+                    if isinstance(item.strokeColor, Color) and not isinstance(item.strokeColor, CMYKColor):
+                        r, g, b = item.strokeColor.red, item.strokeColor.green, item.strokeColor.blue
+                        c, m, y, k = self.rgb_to_cmyk(r, g, b)
+                        item.strokeColor = CMYKColor(c, m, y, k)
+                self.convert_svg_colors_to_cmyk(item)
+
+    def _load_logo(self, logo_path: str) -> Drawing:
+        """ロゴを読み込む"""
+        try:
+            # SVGを読み込む
+            drawing = svg2rlg(logo_path)
+            return drawing
+        except Exception as e:
+            raise ValueError(f"ロゴの読み込みに失敗しました: {str(e)}")
+
     def draw_logo(self, c: canvas.Canvas, logo_path: str, x: float, y: float, width: float, height: float):
         """共通のロゴ描画処理"""
         try:
             drawing = self._load_logo(logo_path)
-
+            
             # 指定されたサイズに合わせてスケーリング
             scale_x = width / drawing.width
             scale_y = height / drawing.height
@@ -94,15 +144,6 @@ class BaseBackDesign:
         except Exception as e:
             print(f"⚠️ SVGロゴの描画中にエラーが発生しました: {e}")
 
-    def _load_logo(self, logo_path: str) -> Drawing:
-        """ロゴを読み込む"""
-        try:
-            # SVGファイルを読み込む
-            drawing = svg2rlg(logo_path)
-            return drawing
-        except Exception as e:
-            raise ValueError(f"ロゴの読み込みに失敗しました: {str(e)}")
-
     def generate(self, output_path: str, data: dict):
         """サブクラスで実装する必要があるメソッド"""
         try:
@@ -114,41 +155,20 @@ class BaseBackDesign:
                 output_path,
                 pagesize=(self.width_mm * 2.8346, self.height_mm * 2.8346),  # 1mm = 2.8346pt
                 pageCompression=1,  # 圧縮を有効化
-                invariant=True,  # 再現性を確保
-                colorSpace='RGB'  # カラースペースをRGBに設定
+                invariant=True  # 再現性を確保
             )
+
+            # CMYKカラースペースを設定
+            c.setPageCompression(1)
+            c.setPageSize((self.width_mm * 2.8346, self.height_mm * 2.8346))
+            c.setFillColor(CMYKColor(0, 0, 0, 0))  # 透明
+            c.setStrokeColor(CMYKColor(0, 0, 0, 0))  # 透明
 
             # デザインの生成
             self._generate_design(c, data)
 
             # PDFを保存
             c.save()
-            
-            # PDFをCMYKに変換
-            from PyPDF2 import PdfReader, PdfWriter
-            reader = PdfReader(output_path)
-            writer = PdfWriter()
-            
-            # 各ページをCMYKに変換
-            for page in reader.pages:
-                writer.add_page(page)
-            
-            # CMYKプロファイルを設定
-            writer.add_metadata({
-                '/OutputIntents': [{
-                    '/Type': '/OutputIntent',
-                    '/S': '/GTS_PDFA1',
-                    '/OutputCondition': 'sRGB IEC61966-2.1',
-                    '/OutputConditionIdentifier': 'sRGB IEC61966-2.1',
-                    '/RegistryName': 'http://www.color.org',
-                    '/Info': 'sRGB IEC61966-2.1',
-                    '/DestOutputProfile': 'sRGB IEC61966-2.1'
-                }]
-            })
-            
-            # 変換したPDFを保存
-            with open(output_path, 'wb') as f:
-                writer.write(f)
             
             print(f"✅ 名刺の裏面を生成しました: {output_path}")
 
