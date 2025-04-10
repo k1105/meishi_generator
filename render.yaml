@@ -3,10 +3,11 @@ services:
     name: meishi-backend
     env: node
     plan: free
+    rootDir: node-backend
     buildCommand: |
       npm install
       npm run build
-      pip install -r python-generator/requirements.txt
+      pip install -r ../python-generator/requirements.txt
     startCommand: npm run start
     envVars:
       - fromGroup: meishi-env
