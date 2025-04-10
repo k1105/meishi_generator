@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: meishi-backend
+    env: node
+    plan: free
+    buildCommand: |
+      npm install
+      npm run build
+      pyenv install -s 3.8.8
+      pyenv global 3.8.8
+      python3 -m pip install --upgrade pip==25.0.1
+      python3 -m pip install -r python-generator/requirements.txt
+    startCommand: npm run start
+    envVars:
+      - key: DROPBOX_CLIENT_ID
+        fromEnvVar: DROPBOX_CLIENT_ID
+      - key: DROPBOX_CLIENT_SECRET
+        fromEnvVar: DROPBOX_CLIENT_SECRET
+      - key: DROPBOX_REFRESH_TOKEN
+        fromEnvVar: DROPBOX_REFRESH_TOKEN
