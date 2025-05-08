@@ -1,3 +1,4 @@
+```mermaid
 %%{init: {'theme': 'default', 'flowchart': { 'curve': 'linear', 'nodeSpacing': 50, 'rankSpacing': 50 }}}%%
 flowchart TD
 
@@ -46,3 +47,4 @@ flowchart TD
         A3[":::dev 開発担当者"]
         A4[":::external 外部API（通信：HTTPS）"]
     end
+```
